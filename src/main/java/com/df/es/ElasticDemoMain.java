@@ -5,17 +5,17 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ESStoreData implements Runnable {
+public class ElasticDemoMain implements Runnable {
 
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 	private final String INDEX_NAME = "data";
-	private final String NUMBER_OF_SHARDS = "2";
-	private final String NUMBER_OF_REPLICAS = "1";
 	
 	public static void main(String[] args) {
-		new ESStoreData().run();
+		new ElasticDemoMain().run();
 	}
 
+	
+	
 	@Override
 	public void run() {
 		logger.info("Starting...");
@@ -23,23 +23,31 @@ public class ESStoreData implements Runnable {
 		ElasticSearchConnector es = null;
 		
 		try {
-			ElasticDataDemo[] elastics = new ElasticDataDemo[] {
-					new ElasticDataDemo("Item 1"),
-					new ElasticDataDemo("Item 2"),
-					new ElasticDataDemo("Item 3")
-			};
+			final int samples = 100;
+			final boolean recreateData = false;	// Change 
+			
+			
 			
 			es = new ElasticSearchConnector("DEMO", "localhost", 9200);
 			
-			es.isClusterHealthy();
+			if (!es.isClusterHealthy()) {
+				logger.warn("Cluster is not healthy yet");
+			}
 				
 			if (!es.isIndexRegistered(INDEX_NAME)) {
-				es.createIndex(INDEX_NAME, NUMBER_OF_SHARDS, NUMBER_OF_REPLICAS);
-				
-				
-				
-				
+				es.createIndex(INDEX_NAME);
 			}
+			
+			if (recreateData) {
+				es.clearIndex(INDEX_NAME);
+				
+				ElasticData datas[] = ElasticDataFactory.createDemoData(samples);
+				for (ElasticData data : datas) {
+					es.indexDocument(INDEX_NAME, data);
+				}
+			}
+			
+			es.queryResultsWithFieldFields(INDEX_NAME, "category", "RED", "created");
 		} catch (Exception e) {
 			logger.error("Error on ElasticSearch", e);
 		} finally {

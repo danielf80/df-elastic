@@ -4,26 +4,32 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Random;
 
-public class ElasticDataDemo implements Serializable {
+public class ElasticData implements Serializable {
 
 	private static final long serialVersionUID = 1L;
 	
 	private String name;
+	private String category;
 	private LocalDateTime created;
 	private boolean quality;
 	private int intValue;
 	private double decValue;
 	
-	public ElasticDataDemo() {
+	public ElasticData() {
 		// TODO Auto-generated constructor stub
 	}
 	
-	public ElasticDataDemo(String name) {
+	public ElasticData(String name) {
 		this.name = name;
 		this.created = LocalDateTime.now();
 		this.quality = true;
 		this.intValue = new Random(name.hashCode()).nextInt();
 		this.decValue = new Random(name.hashCode()).nextDouble();
+	}
+	public ElasticData(String name, String cat, int timeReverseMin) {
+		this(name);
+		this.category = cat;
+		this.created = LocalDateTime.now().minusMinutes(timeReverseMin);
 	}
 	
 	public String getName() {
@@ -55,5 +61,11 @@ public class ElasticDataDemo implements Serializable {
 	}
 	public void setCreated(LocalDateTime created) {
 		this.created = created;
+	}
+	public String getCategory() {
+		return category;
+	}
+	public void setCategory(String category) {
+		this.category = category;
 	}
 }

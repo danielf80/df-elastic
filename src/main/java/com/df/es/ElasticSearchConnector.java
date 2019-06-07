@@ -3,12 +3,14 @@ package com.df.es;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.http.HttpHost;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
-import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
+import org.elasticsearch.client.indices.GetIndexRequest;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequest;
@@ -24,6 +26,8 @@ import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.reindex.BulkByScrollResponse;
+import org.elasticsearch.index.reindex.DeleteByQueryRequest;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
@@ -57,7 +61,7 @@ public class ElasticSearchConnector implements Closeable {
 	public boolean isClusterHealthy() {
 		
 		ClusterHealthRequest request = new ClusterHealthRequest()
-				.timeout(TimeValue.timeValueSeconds(30))
+				.timeout(TimeValue.timeValueSeconds(60))
 				.waitForGreenStatus();
 		
 		try {
@@ -83,20 +87,18 @@ public class ElasticSearchConnector implements Closeable {
 		try {
 			return client
 				    .indices()
-				    .exists(new GetIndexRequest().indices(indexName).masterNodeTimeout(TimeValue.timeValueSeconds(2)), RequestOptions.DEFAULT);
+				    .exists(new GetIndexRequest(indexName), RequestOptions.DEFAULT);
 		} catch (IOException e) {
 			logger.error("Request error", e);
 		}
 		return false;
 	}
 	
-	public boolean createIndex( String indexName, String numberOfShards, String numberOfReplicas ) {
+	public boolean createIndex( String indexName ) {
 		
 		CreateIndexRequest createIndexRequest = new CreateIndexRequest(indexName);
 		createIndexRequest.setTimeout(TimeValue.timeValueSeconds(4));
-		createIndexRequest.settings(Settings.builder()
-				.put("index.number_of_shards", numberOfShards ) 
-                .put("index.number_of_replicas", numberOfReplicas ));
+		createIndexRequest.settings(Settings.builder());
 		
 		CreateIndexResponse createIndexResponse;
 		try {
@@ -109,7 +111,7 @@ public class ElasticSearchConnector implements Closeable {
 		return false;				
 	}
 	
-	public boolean indexDocument( String indexName, ElasticDataDemo data) {
+	public boolean indexDocument( String indexName, ElasticData data) {
 		
 		try {
 			XContentBuilder builder = XContentFactory.jsonBuilder();
@@ -120,10 +122,10 @@ public class ElasticSearchConnector implements Closeable {
 				builder.timeField("created", data.getCreated());
 				builder.field("decValue", data.getDecValue());
 				builder.field("intValue", data.getIntValue());
+				builder.field("category", data.getCategory());
 			}
 			builder.endObject();
 			IndexRequest request = new IndexRequest(indexName)
-					.index(data.getName())
 					.source(builder);
 			
 			IndexResponse response = client.index(request, RequestOptions.DEFAULT);
@@ -133,10 +135,60 @@ public class ElasticSearchConnector implements Closeable {
 			}
 			logger.warn("Index response: {}/{}", response.getResult(), response.status());
 		} catch (Exception e) {
-			logger.error("Error on insert documento");
+			logger.error("Request error", e);
 		}
 		
 		return false;
+	}
+	
+	public void clearIndex( String indexName ) {
+		try {
+			DeleteByQueryRequest request = new DeleteByQueryRequest(indexName).setQuery(QueryBuilders.matchAllQuery());
+			
+			BulkByScrollResponse response = client.deleteByQuery(request, RequestOptions.DEFAULT);
+			
+			logger.warn("Index response: {}/{}", response.getStatus(), response.getTotal());
+		} catch (IOException e) {
+			logger.error("Request error", e);
+		}
+	}
+	
+	public void queryResultsWithFieldFields( String indexName, String fieldFilter, String fieldValue, String sortField ) {
+		SearchResponse scrollResp;
+		try {
+			scrollResp = client
+					.search(new SearchRequest(new String[] {indexName}, 
+							new SearchSourceBuilder()
+								.sort(sortField, SortOrder.ASC)
+								.postFilter( QueryBuilders.matchPhraseQuery(fieldFilter, fieldValue))
+								.size(100))
+							.scroll(TimeValue.timeValueSeconds(10)), RequestOptions.DEFAULT);
+			
+			int hitCount = 0;
+			Set<String> scrolls = new HashSet<String>();
+			do {
+				StringBuilder builder = new StringBuilder();
+				if (scrolls.contains(scrollResp.getScrollId()))
+					break;
+				
+				scrolls.add(scrollResp.getScrollId());
+				
+				for ( SearchHit hit : scrollResp.getHits().getHits()) {
+					Map<String,Object> res = hit.getSourceAsMap();
+					hitCount++;
+			    	// print results
+					builder.setLength(0);
+					builder.append("doc: ").append(hit.docId()).append(", Score: ").append(hit.getScore()).append(" =");
+			    	for( Map.Entry<String,Object> entry : res.entrySet() ) {
+			    		builder.append(" ").append(entry.getKey()).append("(").append(entry.getValue()).append(")");
+			    	}
+			    	logger.info(builder.toString());
+				}
+			} while (scrollResp.getHits().getHits().length != 0);
+			logger.info("Hits: {}, Scrolls: {}", hitCount, scrolls.size());
+		} catch (IOException e) {
+			logger.error("Request error", e);
+		}
 	}
 	
 	public void queryResultsWithAgeFilter( String indexName, int from, int to ) {
